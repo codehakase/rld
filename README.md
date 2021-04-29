@@ -24,3 +24,4 @@ $ rld cmd/main.go
 ```
 
 ## Author
+- [@codehakase](https://twitter.com/codehakase)
