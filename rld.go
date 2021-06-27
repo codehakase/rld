@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 )
@@ -34,9 +35,11 @@ func main() {
 	}
 	defer watcher.Close()
 
-	done := make(chan bool)
+	waiting := false
+	//done := make(chan bool)
+	timer := time.NewTimer(time.Millisecond)
 	sigs := make(chan os.Signal, 1)
-	echan := make(chan bool, 1)
+	echan := make(chan bool)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
 	// run command and watch file for changes
@@ -48,8 +51,25 @@ func main() {
 			select {
 			case e := <-watcher.Events:
 				if e.Op.String() == "WRITE" || e.Op.String() == "WRITE|CHMOD" {
-					fmt.Println("[rld] detected change, restarting...")
+					if waiting {
+						if !timer.Stop() {
+							<-timer.C
+						}
+						timer.Reset(100 * time.Millisecond)
+						continue
+					}
+					fmt.Println("[rld] detected change")
+					fmt.Println("[rld] waiting for 100ms to verify file closure")
+					//sets waiting to true for first write Events
+					waiting = true
+					timer.Reset(100 * time.Millisecond)
+				}
+
+			case <-timer.C:
+				if waiting {
+					fmt.Println("[rld] No Further Change Detected, Restarting...")
 					go runCmd(f)
+					waiting = false
 				}
 			case err := <-watcher.Errors:
 				log.Fatal(err)
@@ -65,7 +85,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	go func() { <-done }()
+	//	go func() { <-done }()
 	<-echan
 }
 
