@@ -16,6 +16,7 @@ import (
 
 var (
 	version = "0.0.1"
+	process *os.Process
 )
 var usage = `Usage: rld <file>
 Options:
@@ -36,8 +37,7 @@ func main() {
 	defer watcher.Close()
 
 	waiting := false
-	//done := make(chan bool)
-	timer := time.NewTimer(time.Millisecond)
+	timer := time.NewTimer(1000 * time.Millisecond)
 	sigs := make(chan os.Signal, 1)
 	echan := make(chan bool)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -55,19 +55,20 @@ func main() {
 						if !timer.Stop() {
 							<-timer.C
 						}
-						timer.Reset(100 * time.Millisecond)
+						timer.Reset(500 * time.Millisecond)
 						continue
 					}
 					fmt.Println("[rld] detected change")
-					fmt.Println("[rld] waiting for 100ms to verify file closure")
-					//sets waiting to true for first write Events
+					fmt.Println("[rld] waiting for 500ms to verify file closure")
+					//sets waiting to true for subsequent write events
 					waiting = true
-					timer.Reset(100 * time.Millisecond)
+					timer.Reset(500 * time.Millisecond)
 				}
 
 			case <-timer.C:
 				if waiting {
-					fmt.Println("[rld] No Further Change Detected, Restarting...")
+					fmt.Println("[rld] no further change detected, restarting...")
+					killPid(process)
 					go runCmd(f)
 					waiting = false
 				}
@@ -87,6 +88,9 @@ func main() {
 
 	//	go func() { <-done }()
 	<-echan
+
+	//Kill Last Created Child Before Exiting
+	killPid(process)
 }
 
 func info(f string) {
@@ -97,13 +101,25 @@ func info(f string) {
 func runCmd(file string) {
 	fmt.Println("[rld] exec: go run", file)
 	cmd := exec.Command("go", "run", file)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stdout
-	log.Print(cmd.Run())
+	log.Print(cmd.Start(), "\nProgram Output:\n==============\n")
+
+	if cmd.Process != nil {
+		process = cmd.Process
+	}
 }
 
 func errUsage() {
 	fmt.Fprintf(os.Stderr, usage)
 	fmt.Fprintf(os.Stderr, "\n\n")
 	os.Exit(1)
+}
+
+func killPid(process *os.Process) {
+	fmt.Printf("[rld] Killing previous process: %d\n", process.Pid)
+	if process != nil {
+		syscall.Kill(-process.Pid, syscall.SIGKILL)
+	}
 }
