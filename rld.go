@@ -28,16 +28,15 @@ Options:
 `
 
 func main() {
-	// if len(os.Args) < 2 {
-	// 	errUsage()
-	// }
 
 	var (
 		check fs.FileInfo
 		err   error
 		path  string
 		args  []string
+		cmd   string
 	)
+
 	if len(os.Args) < 2 {
 		path = "."
 	} else {
@@ -50,12 +49,12 @@ func main() {
 
 	check, err = os.Stat(path)
 	if err != nil {
-		log.Fatal("1", err)
+		log.Fatal(err)
 	}
 
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		log.Fatal("2", err)
+		log.Fatal(err)
 	}
 	defer watcher.Close()
 
@@ -65,9 +64,6 @@ func main() {
 	echan := make(chan struct{})
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	filesToSkip := []string{"vendor"}
-
-	// run command and watch file for changes
-	//info(check.Name())
 
 	go func() {
 		for {
@@ -81,7 +77,7 @@ func main() {
 						timer.Reset(500 * time.Millisecond)
 						continue
 					}
-					fmt.Println("[rld] detected change")
+					fmt.Println("\n==============\n[rld] detected change")
 					fmt.Println("[rld] waiting for 500ms to verify file closure")
 					//sets waiting to true for subsequent write events
 					waiting = true
@@ -92,12 +88,12 @@ func main() {
 				if waiting {
 					fmt.Println("[rld] no further change detected, restarting...")
 					killPid(process)
-					go runCmd(path)
+					go runCmd(cmd)
 					waiting = false
 				}
 
 			case err := <-watcher.Errors:
-				log.Fatal("3", err)
+				log.Fatal(err)
 
 			case sig := <-sigs:
 				fmt.Println()
@@ -112,21 +108,19 @@ func main() {
 		for {
 			fmt.Scanln(&input)
 			if input == "rst" {
-				fmt.Println("[rld] manual input requested, restarting...")
+				fmt.Println("[rld] manual restart requested, restarting...")
 				killPid(process)
-				go runCmd(path)
+				go runCmd(cmd)
 			}
 		}
 	}()
 
 	if check.IsDir() {
 		fmt.Println("[rld] Directory detected")
-		fmt.Println(path)
-
 		if path != "." {
 			err := os.Chdir(path)
 			if err != nil {
-				log.Fatal("4", err)
+				log.Fatal(err)
 			}
 			path = "."
 		}
@@ -140,27 +134,34 @@ func main() {
 			}
 			if fileinfo.IsDir() {
 				if contains(filesToSkip, fileinfo.Name()) || fileinfo.Name() != "." && strings.HasPrefix(fileinfo.Name(), ".") {
-					fmt.Printf("Skipping Dir %v\n", fileinfo.Name())
+					fmt.Printf("[rld] Skipping Dir %v\n", fileinfo.Name())
 					return filepath.SkipDir
 				}
 
 			} else {
 				if filepath.Ext(fileinfo.Name()) == ".go" && !strings.Contains(fileinfo.Name(), "_test") {
 					info(docpath)
-					err = watcher.Add(path)
+					err = watcher.Add(docpath)
 				}
 			}
 
 			return err
 		})
-		go runCmd(path)
+		cmd = path
+		go runCmd(cmd)
 	} else {
 		fmt.Println("[rld] File detected")
+		if filepath.Ext(path) != ".go" {
+			fmt.Println("[rld] Cannot Run Non Golang File")
+			return
+		}
+
 		info(path)
 		if err := watcher.Add(check.Name()); err != nil {
-			log.Fatal("5", err)
+			log.Fatal(err)
 		}
-		go runCmd(fmt.Sprintf("%s %s", path, strings.Join(args, " ")))
+		cmd = fmt.Sprintf("%s %s", path, strings.Join(args, " "))
+		go runCmd(cmd)
 	}
 
 	//	go func() { <-done }()
@@ -182,7 +183,7 @@ func runCmd(file string) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stdout
-	log.Print(cmd.Start(), "\nProgram Output:\n==============\n")
+	log.Print(cmd.Start(), "\n==============\nProgram Output:")
 
 	if cmd.Process != nil {
 		process = cmd.Process
